@@ -1,5 +1,8 @@
 use std::{fmt, io};
+use iced_x86::DecoderError;
 use windows_sys::Win32::Foundation::GetLastError;
+
+use crate::Address;
 
 #[derive(Debug)]
 pub enum DebugError {
@@ -13,8 +16,11 @@ pub enum DebugError {
     ThreadOpenFailed(u32),
     GetContextFailed(u32),
     SetContextFailed(u32),
+    BreakpointMismatch(Address),
     InvalidState(&'static str),
     WaitTimeout,
+    InvalidInstruction(DecoderError),
+    ThreadNotFound(u32),
     Io(io::Error),
     Other(String),
 }
@@ -57,6 +63,9 @@ impl fmt::Display for DebugError {
                             DebugError::ThreadOpenFailed(_) => todo!(),
                             DebugError::GetContextFailed(_) => todo!(),
                             DebugError::SetContextFailed(_) => todo!(),
+                            DebugError::BreakpointMismatch(address) => todo!(),
+                            DebugError::ThreadNotFound(_) => todo!(),
+                                        DebugError::InvalidInstruction(error) => todo!(),
         }
     }
 }

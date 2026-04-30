@@ -1,3 +1,5 @@
+use std::{io, thread::sleep, time::Duration};
+
 use naive_debugger::*;
 
 fn main() {
@@ -7,7 +9,8 @@ fn main() {
         ::spawn_with_options(exe_path, DebuggerOptions { single_step: true })
         .unwrap();
     
-    while let Ok(event) = debugger.next_event() {
+    loop {
+        let event = debugger.next_event().unwrap();
         let context = event.context;
 
         let status = match event.kind {
@@ -26,5 +29,9 @@ fn main() {
             println!("{}", err);
             break;
         }
+
+        // sleep(Duration::from_secs(2));
+        println!("Press Enter to continue...");
+        let _ = io::stdin().read_line(&mut String::new());
     }
 }

@@ -1,4 +1,5 @@
 use core::ptr::null_mut;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use windows_sys::Win32::Foundation::HANDLE;
@@ -27,21 +28,28 @@ pub enum BreakpointKind {
 
 pub type BreakpointCallback = Arc<dyn Fn() + Send + Sync>;
 
-pub struct BreakpointManager {
-    list: Vec<Breakpoint>,
-}
+pub struct BreakpointManager(HashMap<Address, Breakpoint>);
 
 impl BreakpointManager {
-     pub fn set(
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub fn contains(&self, addr: Address) -> bool {
+        self.0.contains_key(&addr)
+    }
+
+    pub fn get(&self, addr: Address) -> Option<&Breakpoint> {
+        self.0.get(&addr)
+    }
+
+    pub fn set(
         &mut self,
         addr: Address,
         kind: BreakpointKind,
         callback: BreakpointCallback,
         process: HANDLE,
     ) -> Result<(), DebugError> {
-        if self.list.iter().any(|b| b.address == addr && b.enabled) {
-            return Ok(());
-        }
 
         let patch: &[u8] = match kind {
             BreakpointKind::Int3 => &[0xCC],
@@ -90,7 +98,7 @@ impl BreakpointManager {
             );
         }
 
-        self.list.push(Breakpoint {
+        self.0.insert(addr, Breakpoint {
             address: addr,
             original,
             size,
@@ -107,13 +115,7 @@ impl BreakpointManager {
         addr: Address,
         process: HANDLE,
     ) -> Result<(), DebugError> {
-        let idx = self
-            .list
-            .iter()
-            .position(|b| b.address == addr)
-            .ok_or(DebugError::InvalidState("BPX not found"))?;
-
-        let bp = &self.list[idx];
+        let breakpoint = self.0.get(&addr).ok_or(DebugError::InvalidState("Breakpoint not found"))?;
 
         unsafe {
             let mut old = 0;
@@ -121,7 +123,7 @@ impl BreakpointManager {
             VirtualProtectEx(
                 process,
                 addr.raw() as _,
-                bp.size as usize,
+                breakpoint.size as usize,
                 PAGE_EXECUTE_READWRITE,
                 &mut old,
             );
@@ -129,8 +131,8 @@ impl BreakpointManager {
             WriteProcessMemory(
                 process,
                 addr.raw() as _,
-                bp.original.as_ptr() as _,
-                bp.size as usize,
+                breakpoint.original.as_ptr() as _,
+                breakpoint.size as usize,
                 null_mut(),
             );
 
@@ -139,13 +141,13 @@ impl BreakpointManager {
             VirtualProtectEx(
                 process,
                 addr.raw() as _,
-                bp.size as usize,
+                breakpoint.size as usize,
                 old,
                 &mut old,
             );
         }
 
-        self.list.remove(idx);
+        self.0.remove(&addr);
 
         Ok(())
     }

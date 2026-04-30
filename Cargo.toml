@@ -6,6 +6,12 @@ rust-version = "1.97.0"
 repository = "https://github.com/Jozefpodlecki/naive-debugger"
 
 [dependencies]
+anyhow = "1.0.100"
+pelite = "0.10.0"
+iced-x86 = "1.21.0"
+widestring = "1.0"
+flexi_logger = "0.31.8"
+log = "0.4.18"
 windows-sys = { version = "0.61.2", features = [
 	"Win32_Foundation",
     "Win32_Security",
@@ -15,6 +21,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Memory",
     "Win32_System_Kernel",
+    "Win32_System_ProcessStatus",
     "Win32_Storage_FileSystem",
     "Wdk_System_Threading"
 ] }

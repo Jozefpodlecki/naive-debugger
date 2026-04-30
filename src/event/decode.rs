@@ -1,115 +1,11 @@
-use std::ptr::null_mut;
+use std::{path::PathBuf, ptr::null_mut};
 use windows_sys::Win32::{
-    Foundation::HANDLE, Storage::FileSystem::GetFinalPathNameByHandleW, System::Diagnostics::Debug::*
+    Foundation::HANDLE, Storage::FileSystem::GetFinalPathNameByHandleW, System::{Diagnostics::Debug::*, ProcessStatus::GetMappedFileNameW}
 };
 
-use crate::DebugContext;
+use crate::{DebugContext, win32::*};
 
 use super::*;
-
-fn get_path_from_handle(handle: HANDLE) -> Option<String> {
-    if handle.is_null() {
-        return None;
-    }
-
-    let mut buf = vec![0u16; 260];
-
-    let len = unsafe {
-        GetFinalPathNameByHandleW(
-            handle,
-            buf.as_mut_ptr(),
-            buf.len() as u32,
-            0,
-        )
-    };
-
-    if len == 0 {
-        return None;
-    }
-
-    Some(String::from_utf16_lossy(&buf[..len as usize]))
-}
-
-pub unsafe fn read_remote<T: Copy>(
-    process: HANDLE,
-    addr: *const core::ffi::c_void,
-) -> Option<T> {
-    let mut out: T = std::mem::zeroed();
-    let mut bytes = 0;
-
-    let ok = ReadProcessMemory(
-        process,
-        addr,
-        &mut out as *mut _ as *mut _,
-        std::mem::size_of::<T>(),
-        &mut bytes,
-    );
-
-    if ok == 0 {
-        None
-    } else {
-        Some(out)
-    }
-}
-
-pub fn decode_output_debug_string(
-    process: HANDLE,
-    info: &OUTPUT_DEBUG_STRING_INFO,
-) -> String {
-    use std::ptr::null_mut;
-
-    unsafe {
-        let mut buffer = vec![0u8; info.nDebugStringLength as usize + 1];
-
-        let mut bytes_read: usize = 0;
-
-        windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory(
-            process,
-            info.lpDebugStringData as *const _,
-            buffer.as_mut_ptr() as *mut _,
-            info.nDebugStringLength as usize,
-            &mut bytes_read as *mut _,
-        );
-
-        // ANSI or Unicode flag decides interpretation
-        if info.fUnicode != 0 {
-            let wide = std::slice::from_raw_parts(
-                buffer.as_ptr() as *const u16,
-                (bytes_read / 2).max(1),
-            );
-
-            String::from_utf16_lossy(wide)
-        } else {
-            String::from_utf8_lossy(&buffer[..bytes_read]).to_string()
-        }
-    }
-}
-
-pub fn read_wide_string(process: HANDLE, ptr: *const u16) -> Option<String> {
-    if ptr.is_null() {
-        return None;
-    }
-
-    let mut buf = [0u16; 260];
-    let mut bytes = 0;
-
-    let ok = unsafe {
-        ReadProcessMemory(
-            process,
-            ptr as *const _,
-            buf.as_mut_ptr() as *mut _,
-            std::mem::size_of_val(&buf),
-            &mut bytes,
-        )
-    };
-
-    if ok == 0 {
-        return None;
-    }
-
-    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    String::from_utf16(buf[..len].to_vec().as_slice()).ok()
-}
 
 impl DebugEvent {
     pub fn decode(event: &DEBUG_EVENT, process: HANDLE) -> Self {
@@ -183,11 +79,21 @@ impl DebugEvent {
                     read_remote(process, info.lpImageName as *const _)
                         .unwrap_or(null_mut());
 
-                let path = read_wide_string(process, path_ptr);
+
+                let mut nt_path = read_wide_string(process, path_ptr);
+
+                if nt_path.is_none() && !info.lpBaseOfDll.is_null() {
+                    nt_path = get_mapped_file_name(process, info.lpBaseOfDll);
+                }
+
+                let win32_path = get_path_from_file_handle(info.hFile).unwrap();
+                let dll_name = PathBuf::from(&win32_path).file_name().unwrap().to_string_lossy().to_string();
 
                 DebugEventKind::LoadDll(LoadDllEvent {
                     base_address: Address(info.lpBaseOfDll as usize),
-                    path,
+                    nt_path: nt_path.unwrap(),
+                    win32_path,
+                    dll_name 
                 })
             }
 

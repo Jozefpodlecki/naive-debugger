@@ -1,6 +1,6 @@
-use std::fmt;
+use std::{fmt, ops::Add};
 
-use windows_sys::Win32::{Foundation::HANDLE, System::Diagnostics::Debug::DEBUG_EVENT};
+use windows_sys::Win32::{Foundation::{HANDLE, STATUS_BREAKPOINT}, System::Diagnostics::Debug::DEBUG_EVENT};
 
 use crate::DebugContext;
 
@@ -50,11 +50,33 @@ impl fmt::Display for Address {
     }
 }
 
+impl Add<usize> for Address {
+    type Output = Address;
+    
+    fn add(self, rhs: usize) -> Address {
+        Address(self.0 + rhs)
+    }
+}
+
+impl Add for Address {
+    type Output = Address;
+    
+    fn add(self, rhs: Self) -> Address {
+        Address(self.0 + rhs.0)
+    }
+}
+
 #[derive(Debug)]
 pub struct ExceptionEvent {
     pub code: u32,
     pub address: Address,
     pub first_chance: bool,
+}
+
+impl ExceptionEvent {
+    pub fn is_status_breakpoint(&self) -> bool {
+        self.code == STATUS_BREAKPOINT as u32
+    }
 }
 
 #[derive(Debug)]
@@ -87,7 +109,9 @@ pub struct ExitThreadEvent {
 #[derive(Debug)]
 pub struct LoadDllEvent {
     pub base_address: Address,
-    pub path: Option<String>,
+    pub dll_name: String,
+    pub nt_path: String,
+    pub win32_path: String,
 }
 
 #[derive(Debug)]

@@ -13,6 +13,14 @@ pub struct ThreadInfo {
     pub teb: Address,
 }
 
+impl Drop for ThreadInfo {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { CloseHandle(self.handle); }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum HardwareBreakpointType {
     Execute,
@@ -72,7 +80,7 @@ impl ThreadInfo {
     pub fn from_id(id: u32) -> Result<Self, DebugError> {
         unsafe {
             let handle = OpenThread(
-                THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
+                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_QUERY_INFORMATION,
                 0,
                 id,
             );
@@ -114,6 +122,39 @@ impl ThreadInfo {
                 start_address: ip,
                 teb: Address(teb),
             })
+        }
+    }
+
+    pub fn get_rip(&self) -> Result<Address, DebugError> {
+        unsafe {
+            let mut ctx: CONTEXT = std::mem::zeroed();
+            ctx.ContextFlags = CONTEXT_CONTROL_AMD64;
+            
+            if GetThreadContext(self.handle, &mut ctx) == 0 {
+                return Err(DebugError::GetContextFailed(DebugError::last_os_error()));
+            }
+            
+            Ok(Address(ctx.Rip as usize))
+        }
+    }
+
+    pub fn decrease_rip(&self) -> Result<(), DebugError> {
+        unsafe {
+            let mut ctx: CONTEXT = std::mem::zeroed();
+            ctx.ContextFlags = CONTEXT_CONTROL_AMD64;
+
+            if GetThreadContext(self.handle, &mut ctx) == 0 {
+                return Err(DebugError::GetContextFailed(DebugError::last_os_error()));
+            }
+
+            // INT3 is 1 byte → rewind RIP
+            ctx.Rip = ctx.Rip.wrapping_sub(1);
+
+            if SetThreadContext(self.handle, &ctx) == 0 {
+                return Err(DebugError::SetContextFailed(DebugError::last_os_error()));
+            }
+
+            Ok(())
         }
     }
 
