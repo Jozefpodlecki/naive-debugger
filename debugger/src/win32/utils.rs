@@ -1,7 +1,13 @@
 use std::ptr::null_mut;
+use pelite::image::{IMAGE_DOS_HEADER, IMAGE_NT_HEADERS64};
 use windows_sys::Win32::{
-    Foundation::HANDLE, Storage::FileSystem::{GetFinalPathNameByHandleW, GetLogicalDrives, QueryDosDeviceW}, System::{Diagnostics::Debug::*, ProcessStatus::GetMappedFileNameW}
+    Foundation::HANDLE, Storage::FileSystem::*, System::{Diagnostics::{Debug::*, ToolHelp::*}, ProcessStatus::GetMappedFileNameW}
 };
+use windows_sys::Win32::System::Threading::*;
+use windows_sys::Win32::System::ProcessStatus::*;
+use windows_sys::Win32::Foundation::CloseHandle;
+
+use crate::{Address, DebugError, read_process_memory};
 
 pub fn get_path_from_file_handle(handle: HANDLE) -> Option<String> {
     if handle.is_null() {
@@ -230,4 +236,79 @@ pub fn read_wide_string(process: HANDLE, ptr: *const u16) -> Option<String> {
 
     let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
     String::from_utf16(buf[..len].to_vec().as_slice()).ok()
+}
+
+pub fn find_process_by_name(name: &str) -> Option<u32> {
+
+    unsafe {
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..std::mem::zeroed()
+        };
+        
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot.is_null() {
+            return None;
+        }
+        
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                let len = entry.szExeFile
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(0);
+                
+                let process_name = if len > 0 {
+                    String::from_utf16_lossy(&entry.szExeFile[..len])
+                } else {
+                    String::new()
+                };
+
+                if process_name.to_lowercase() == name.to_lowercase() {
+                    CloseHandle(snapshot);
+                    return Some(entry.th32ProcessID);
+                }
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        
+        CloseHandle(snapshot);
+        None
+    }
+}
+
+pub fn read_remote_value<T: Copy>(process: HANDLE, address: Address) -> Result<T, DebugError> {
+    let mut value: T = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<T>();
+    
+    let bytes_read = read_process_memory(
+        process,
+        address,
+        unsafe { std::slice::from_raw_parts_mut(&mut value as *mut T as *mut u8, size) },
+    )?;
+    
+    if bytes_read != size {
+        return Err(DebugError::Other(format!(
+            "read_remote_value: expected {} bytes, got {}",
+            size, bytes_read
+        )));
+    }
+    
+    Ok(value)
+}
+
+pub fn get_entry_point_from_memory(process: HANDLE, image_base: Address) -> Result<Address, DebugError> {
+    let dos_header: IMAGE_DOS_HEADER = read_remote_value(process, image_base)?;
+    if dos_header.e_magic != 0x5A4D {
+        return Err(DebugError::Other("Invalid DOS header".into()));
+    }
+    
+    let nt_headers_addr = image_base.0 + dos_header.e_lfanew as usize;
+    let nt_headers: IMAGE_NT_HEADERS64 = read_remote_value(process, Address(nt_headers_addr))?;
+    
+    let entry_point_rva = nt_headers.OptionalHeader.AddressOfEntryPoint as usize;
+    
+    Ok(Address(image_base.0 + entry_point_rva))
 }

@@ -33,13 +33,14 @@ impl DebugEvent {
                     .or_else(|| get_path_from_handle(info.hFile))
                     .unwrap();
                     // .ok_or_else(|| Err(DebugError::Other("Invalid".into())))?;
-
-                let entry_point = info.lpStartAddress
-                    .map(|f| Address(f as usize))
-                    .unwrap_or_default();
+                let image_base = Address(info.lpBaseOfImage as usize);
+                let entry_point = match info.lpStartAddress {
+                    Some(addr) => Address(addr as usize),
+                    None => get_entry_point_from_memory(info.hProcess, image_base).unwrap(),
+                };
 
                 DebugEventKind::CreateProcess(CreateProcessEvent {
-                    image_base: Address(info.lpBaseOfImage as usize),
+                    image_base,
                     entry_point,
                     file_path,
                     main_thread_handle: info.hThread,

@@ -87,6 +87,7 @@ impl<'a> DebuggerContext<'a> {
 }
 
 pub struct WindowsDebugger {
+    is_attached: bool,
     process: ProcessHandle,
     threads: HashMap<u32, ThreadInfo>,
     // hwbps: [Option<HardwareBreakpoint>; 4],
@@ -176,6 +177,7 @@ impl WindowsDebugger {
             .spawn()?;
 
         Ok(Self {
+            is_attached: false,
             process,
             threads: HashMap::new(),
             // hwbps: [None, None, None, None],
@@ -213,19 +215,32 @@ impl WindowsDebugger {
         Self::spawn_with_options(path, DebuggerOptions::default())
     }
 
-    pub fn attach(pid: u32) -> Result<Self, DebugError> {
+    pub fn attach_with_options(pid: u32, options: DebuggerOptions) -> Result<Self, DebugError> {
         let flags = ProcessAccessFlags::ALL_ACCESS;
         let process = CreateProcessBuilder::attach(pid, flags)?;
 
+        let threads=  enumerate_threads(process.pid).unwrap();
+        dbg!(&threads);
+
+        for thread in threads {
+            let code = thread.resume().unwrap();
+            println!("thread_id={} resume={}", thread.thread_id, code);
+        }
+
         Ok(Self {
+            is_attached: true,
             process,
             threads: HashMap::new(),
             // hwbps: [None, None, None, None],
-            options: Default::default(),
+            options,
             modules: ModulesManager::new(),
             breakpoints: BreakpointManager::new(),
             disasm: Disassembler::new(),
         })
+    }
+
+    pub fn attach(pid: u32) -> Result<Self, DebugError> {
+        Self::attach_with_options(pid, Default::default())
     }
 
 }

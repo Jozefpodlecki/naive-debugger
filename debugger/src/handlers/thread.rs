@@ -6,16 +6,20 @@ pub fn handle_create_thread(debug_context: &DebugContext, mut context: DebuggerC
     
     let thread = ThreadInfo {
         thread_id: event.thread_id,
-        // handle: event.handle,
         start_address: event.start_address.0,
         teb: event.teb,
     };
-    
-    context.insert_thread(thread);
 
     if context.options.breakpoint_on_every_instruction  {
-        context.set_software_breakpoint(event.start_address);
+        thread.suspend()?;
+        let rip = thread.get_rip()?;
+        context.set_software_breakpoint(rip);
+        thread.resume()?;
+        warn!("RIP {rip} START {}", event.start_address);
+        // context.set_software_breakpoint(event.start_address);
     }
+    
+    context.insert_thread(thread);
                
     Ok(None)
 }

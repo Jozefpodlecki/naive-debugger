@@ -1,5 +1,6 @@
 use windows_sys::Wdk::System::Threading::*;
 use windows_sys::Win32::Foundation::{HANDLE, CloseHandle};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::System::Diagnostics::Debug::*;
 
@@ -91,53 +92,52 @@ impl ThreadInfo {
         Ok(handle)
     }
 
-    // pub fn from_id(id: u32) -> Result<Self, DebugError> {
-    //     unsafe {
-    //         let handle = OpenThread(
-    //             THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_QUERY_INFORMATION,
-    //             0,
-    //             id,
-    //         );
+    pub fn from_id(id: u32) -> Result<Self, DebugError> {
+        unsafe {
+            let handle = OpenThread(
+                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_QUERY_INFORMATION,
+                0,
+                id,
+            );
 
-    //         if handle.is_null() {
-    //             return Err(DebugError::Other("OpenThread failed".into()));
-    //         }
+            if handle.is_null() {
+                return Err(DebugError::Other("OpenThread failed".into()));
+            }
 
-    //         let mut ctx: CONTEXT = std::mem::zeroed();
-    //         ctx.ContextFlags = 0x100000;
+            let mut ctx: CONTEXT = std::mem::zeroed();
+            ctx.ContextFlags = 0x100000;
 
-    //         if GetThreadContext(handle, &mut ctx) == 0 {
-    //             CloseHandle(handle);
-    //             return Err(DebugError::Other("GetThreadContext failed".into()));
-    //         }
+            if GetThreadContext(handle, &mut ctx) == 0 {
+                CloseHandle(handle);
+                return Err(DebugError::Other("GetThreadContext failed".into()));
+            }
 
-    //         let teb = {
-    //             let mut teb_ptr: usize = 0;
-    //             let ok = NtQueryInformationThread(
-    //                 handle,
-    //                 9,
-    //                 &mut teb_ptr as *mut _ as *mut _,
-    //                 std::mem::size_of::<usize>() as u32,
-    //                 std::ptr::null_mut(),
-    //             );
+            let teb = {
+                let mut teb_ptr: usize = 0;
+                let ok = NtQueryInformationThread(
+                    handle,
+                    9,
+                    &mut teb_ptr as *mut _ as *mut _,
+                    std::mem::size_of::<usize>() as u32,
+                    std::ptr::null_mut(),
+                );
 
-    //             if ok == 0 {
-    //                 teb_ptr
-    //             } else {
-    //                 0
-    //             }
-    //         };
+                if ok == 0 {
+                    teb_ptr
+                } else {
+                    0
+                }
+            };
 
-    //         let ip = ctx.Rip as usize;
+            let ip = ctx.Rip as usize;
 
-    //         Ok(Self {
-    //             thread_id: id,
-    //             handle,
-    //             start_address: ip,
-    //             teb: Address(teb),
-    //         })
-    //     }
-    // }
+            Ok(Self {
+                thread_id: id,
+                start_address: ip,
+                teb: Address(teb),
+            })
+        }
+    }
 
     pub fn get_rip(&self) -> Result<Address, DebugError> {
         unsafe {
@@ -274,4 +274,42 @@ impl ThreadInfo {
             Ok(())
         }
     }
+}
+
+pub fn enumerate_threads(process_id: u32) -> Result<Vec<ThreadInfo>, DebugError> {
+    let mut threads = Vec::new();
+    
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot.is_null() {
+            return Err(DebugError::Other("Failed to create thread snapshot".into()));
+        }
+        
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            cntUsage: 0,
+            th32ThreadID: 0,
+            th32OwnerProcessID: 0,
+            tpBasePri: 0,
+            tpDeltaPri: 0,
+            dwFlags: 0,
+        };
+        
+        if Thread32First(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32OwnerProcessID == process_id {
+                    let thread_info = ThreadInfo::from_id(entry.th32ThreadID)?;
+                    threads.push(thread_info);
+                }
+                
+                if Thread32Next(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        
+        CloseHandle(snapshot);
+    }
+    
+    Ok(threads)
 }

@@ -24,6 +24,10 @@ fn main() {
             println!("Running infinite loop example");
             fixtures::infinite_loop();
         }
+        "--example=infinite-sleep" | "infinite-sleep" | "--example=sleep-loop" => {
+            println!("Running infinite sleep loop example");
+            fixtures::infinite_sleep_loop();
+        }
         _ => {
             println!("Usage: {} --example=<sleep|infinite>", args[0]);
             println!("Examples:");

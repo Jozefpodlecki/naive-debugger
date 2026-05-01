@@ -34,6 +34,16 @@ while let Ok(event) = debugger.next_event() {
 }
 ```
 
+## 🏃‍♂️ Running Test Binaries
+
+The workspace includes test binaries with different behaviors:
+
+```sh
+$env:EXAMPLE="infinite-sleep" 
+cargo run -p with-std-examples
+# or cargo run -p with-std-examples infinite-sleep
+```
+
 ## 📦 Features
 
 - **Process Creation & Attachment** – Spawn processes under debugger or attach to running ones
